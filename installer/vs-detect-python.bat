@@ -1,11 +1,11 @@
 @echo off
 
-IF EXIST "Python310.dll" (
-    ECHO Python 3.10 detected
+IF EXIST "Python311.dll" (
+    ECHO Python 3.11 detected
     GOTO end
 )
 
-ECHO Python 3.10 is supported
+ECHO Python 3.11 is supported
 GOTO end
 
 :end

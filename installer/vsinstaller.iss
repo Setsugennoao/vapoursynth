@@ -1,7 +1,7 @@
 #define Version '60'
 #define VersionExtra ''
-#define PythonVersion '3.10'
-#define PythonCompactVersion '310'
+#define PythonVersion '3.11'
+#define PythonCompactVersion '311'
 
 #ifndef InstallerBits
   #define InstallerBits '64'
