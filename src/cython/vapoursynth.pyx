@@ -2455,6 +2455,10 @@ cdef class Plugin(object):
             func = self.funcs.getNextPluginFunction(func, self.plugin)
             yield tmp
 
+    @property
+    def __version__(self):
+        return <int>self.funcs.getPluginVersion(self.plugin)
+
     def __dir__(self):
         attrs = []
         if isinstance(self.injected_arg, VideoNode):
