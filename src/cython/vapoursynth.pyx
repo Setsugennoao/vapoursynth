@@ -43,6 +43,7 @@ import traceback
 import typing
 import weakref
 from collections import namedtuple
+from concurrent.futures import Future
 from fractions import Fraction
 from threading import RLock, local as ThreadLocal
 from types import MappingProxyType
@@ -1632,7 +1633,6 @@ cdef class RawNode(object):
                 else:
                     fut.set_result(result)
 
-            from concurrent.futures import Future
             fut = Future()
             fut.set_running_or_notify_cancel()
 
