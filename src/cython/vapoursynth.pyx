@@ -1525,6 +1525,7 @@ cdef class AudioFrame(RawFrame):
             raise TypeError("frame indices must be integers, not %s"
                             % (type(index).__name__,))
 
+    @property
     def channels(self):
         return [v for v in AudioChannels if ((1 << v) & self.channel_layout)]
 
@@ -2140,6 +2141,7 @@ cdef class AudioNode(RawNode):
     def set_output(self, int index = 0):
         _get_output_dict("set_output")[index] = self
 
+    @property
     def channels(self):
         return [v for v in AudioChannels if ((1 << v) & self.channel_layout)]
 
