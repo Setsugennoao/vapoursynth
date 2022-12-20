@@ -17,46 +17,40 @@
 #  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 """ This is the VapourSynth module implementing the Python bindings. """
 
-cimport vapoursynth
 include 'vsconstants.pxd'
+
 from vsscript_internal cimport VSScript
-cimport cython.parallel
-from cython cimport view, final
-from libc.stdint cimport intptr_t, int16_t, uint16_t, int32_t, uint32_t
-from cpython.buffer cimport PyBUF_SIMPLE
-from cpython.buffer cimport PyBuffer_FillInfo
-from cpython.buffer cimport PyBuffer_IsContiguous
-from cpython.buffer cimport PyBuffer_Release
-from cpython.memoryview cimport PyMemoryView_FromObject
-from cpython.memoryview cimport PyMemoryView_GET_BUFFER
-from cpython.number cimport PyIndex_Check
-from cpython.number cimport PyNumber_Index
+
+cimport cython
+cimport cython.parallel  # type: ignore
+
+from libc.stdint cimport uintptr_t
+
+from cpython.buffer cimport PyBUF_SIMPLE, PyBuffer_FillInfo, PyBuffer_IsContiguous, PyBuffer_Release
+from cpython.memoryview cimport PyMemoryView_FromObject, PyMemoryView_GET_BUFFER
+from cpython.number cimport PyIndex_Check, PyNumber_Index
 from cpython.ref cimport Py_INCREF, Py_DECREF
-import os
-import enum
-import ctypes
-import threading
-import traceback
-import gc
-import sys
-import inspect
-import weakref
 import atexit
 import contextlib
+import ctypes
+import enum
+import gc
+import inspect
 import logging
-import functools
-from threading import local as ThreadLocal, Lock, RLock
-from types import MappingProxyType
+import os
+import sys
+import traceback
+import typing
+import weakref
 from collections import namedtuple
-from collections.abc import Iterable, Mapping
+from concurrent.futures import Future
 from fractions import Fraction
+from threading import RLock, local as ThreadLocal
+from types import MappingProxyType
 
-# Ensure that the import doesn't fail
-# if typing is not available on the python installation.
-try:
-    import typing
-except ImportError as e:
-    typing = None
+if typing.TYPE_CHECKING:
+    from vapoursynth cimport *
+
 
 __all__ = [
   'GRAY',
@@ -71,26 +65,26 @@ __all__ = [
     'YUV440P8',
     'YUV444P8', 'YUV444P9', 'YUV444P10', 'YUV444P12', 'YUV444P14', 'YUV444P16', 'YUV444PH', 'YUV444PS',
   'NONE',
-  
+
   'FLOAT', 'INTEGER',
-  
+
   'RANGE_FULL', 'RANGE_LIMITED',
-  
+
   'CHROMA_LEFT', 'CHROMA_CENTER', 'CHROMA_TOP_LEFT', 'CHROMA_TOP', 'CHROMA_BOTTOM_LEFT', 'CHROMA_BOTTOM',
-  
+
   'FIELD_PROGRESSIVE', 'FIELD_TOP', 'FIELD_BOTTOM',
-  
+
   'get_output', 'get_outputs',
   'clear_output', 'clear_outputs',
-  
-  'core', 
+
+  'core',
 ]
     
 __version__ = namedtuple("VapourSynthVersion", "release_major release_minor")(61, 0)
 __api_version__ = namedtuple("VapourSynthAPIVersion", "api_major api_minor")(VAPOURSYNTH_API_MAJOR, VAPOURSYNTH_API_MINOR)
 
 
-@final
+@cython.final
 cdef class EnvironmentData(object):
     cdef bint alive
     cdef Core core
@@ -137,7 +131,7 @@ class EnvironmentPolicy(object):
         return env.alive
 
 
-@final
+@cython.final
 cdef class StandaloneEnvironmentPolicy:
     cdef EnvironmentData _environment
     cdef object _api
@@ -209,7 +203,7 @@ cdef void __stdcall _logFree(void* userData) nogil:
     with gil:
         Py_DECREF(<object>userData)
 
-@final
+@cython.final
 cdef class EnvironmentPolicyAPI:
     # This must be a weak-ref to prevent a cyclic dependency that happens if the API
     # is stored within an EnvironmentPolicy-instance.
@@ -313,7 +307,7 @@ def register_policy(policy):
     cdef EnvironmentPolicyAPI _api = EnvironmentPolicyAPI.__new__(EnvironmentPolicyAPI)
     _api._target_policy = weakref.ref(_policy)
     _api._known_environments = weakref.WeakValueDictionary()
-    _api._lock = threading.Lock()
+    _api._lock = RLock()
     _policy.on_policy_registered(_api)
 
 
@@ -385,7 +379,7 @@ def unregister_on_destroy(callback):
     env.on_destroy.remove(callback)
 
 
-@final
+@cython.final
 cdef class _FastManager(object):
     cdef EnvironmentData target
     cdef EnvironmentData previous
@@ -398,7 +392,7 @@ cdef class _FastManager(object):
         if self.target is not None:
             get_policy().set_environment(self.target)
             self.target = None
-    
+
     def __exit__(self, *_):
         policy = get_policy()
         if policy.is_alive(self.previous):
@@ -503,15 +497,15 @@ def _construct_type(signature):
 
     # Handle types
     if type == "vnode":
-        type = vapoursynth.VideoNode
+        type = VideoNode
     elif type == "anode":
-        type = vapoursynth.AudioNode
+        type = AudioNode
     elif type == "vframe":
-        type = vapoursynth.VideoFrame
+        type = VideoFrame
     elif type == "aframe":
-        type = vapoursynth.AudioFrame
+        type = AudioFrame
     elif type == "func":
-        type = typing.Union[vapoursynth.Func, typing.Callable]
+        type = typing.Union[Func, typing.Callable]
     elif type == "int":
         type = int
     elif type == "float":
@@ -528,7 +522,7 @@ def _construct_type(signature):
     # Mark an optional type
     if opt:
         type = typing.Optional[type]
-        
+
     return type
 
 def _construct_parameter(signature):
@@ -540,23 +534,20 @@ def _construct_parameter(signature):
 
     name, signature = signature.split(":", 1)
     type = _construct_type(signature)
-    
+
     __,*opt = signature.split(":")
     if opt:
         default_value = None
     else:
         default_value = inspect.Parameter.empty
-        
+
     return inspect.Parameter(
         name, inspect.Parameter.POSITIONAL_OR_KEYWORD,
         default=default_value, annotation=type
     )
 
 def construct_signature(signature, return_signature, injected=None):
-    if typing is None:
-        raise RuntimeError("At least Python 3.5 is required to use type-hinting")
-    
-    if isinstance(signature, vapoursynth.Function):
+    if isinstance(signature, Function):
         signature = signature.signature
 
     params = list(
@@ -583,33 +574,6 @@ def construct_signature(signature, return_signature, injected=None):
 
     return inspect.Signature(tuple(params), return_annotation=return_annotation)
 
-def _construct_repr_wrap(value):
-    if isinstance(value, (enum.Enum, VideoFormat)):
-        return value.name
-
-    if isinstance(value, typing.Iterator):
-        value = ', '.join(_construct_repr_wrap(v) for v in value)
-
-    to_wrap = isinstance(value, str) and not value.startswith('<') and ' ' in value
-
-    if to_wrap:
-        return f'"{value}"'
-    
-    return value
-
-def _construct_repr(obj, **kwargs):
-    address = f'{id(obj):X}'.rjust(16, "0")
-
-    add_data = ''
-
-    if kwargs:
-        add_data += ', '.join(
-            f'{key}={_construct_repr_wrap(value)}'
-            for key, value in kwargs.items()
-        )
-        add_data = f' {add_data}'
-
-    return f'<{obj.__class__.__module__}.{obj.__class__.__qualname__} object at 0x{address}{add_data}>'
 
 class Error(Exception):
     def __init__(self, value):
@@ -617,16 +581,16 @@ class Error(Exception):
 
     def __str__(self):
         return str(self.value)
-        
+
     def __repr__(self):
         return repr(self.value)
-    
+
 cdef _get_output_dict(funcname="this function"):
     cdef EnvironmentData env = _env_current()
     if env is None:
         raise Error('Internal environment id not set. %s called from a filter callback?'%funcname)
     return env.outputs
-    
+
 def clear_output(int index = 0):
     cdef dict outputs = _get_output_dict("clear_output")
     try:
@@ -649,10 +613,10 @@ cdef class FuncData(object):
     cdef object func
     cdef VSCore *core
     cdef EnvironmentData env
-    
+
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
     def __call__(self, **kwargs):
         return self.func(**kwargs)
 
@@ -662,18 +626,18 @@ cdef FuncData createFuncData(object func, VSCore *core, EnvironmentData env):
     instance.core = core
     instance.env = env
     return instance
-    
+
 cdef class Func(object):
     cdef const VSAPI *funcs
     cdef VSFunction *ref
-    
+
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
     def __dealloc__(self):
         if self.funcs:
             self.funcs.freeFunction(self.ref)
-        
+
     def __call__(self, **kwargs):
         cdef VSMap *outm
         cdef VSMap *inm
@@ -692,7 +656,7 @@ cdef class Func(object):
         finally:
             vsapi.freeMap(outm)
             vsapi.freeMap(inm)
-        
+
 cdef Func createFuncPython(object func, VSCore *core, const VSAPI *funcs):
     cdef Func instance = Func.__new__(Func)
     instance.funcs = funcs
@@ -705,7 +669,7 @@ cdef Func createFuncPython(object func, VSCore *core, const VSAPI *funcs):
     Py_INCREF(fdata)
     instance.ref = instance.funcs.createFunction(publicFunction, <void *>fdata, freeFunc, core)
     return instance
-        
+
 cdef Func createFuncRef(VSFunction *ref, const VSAPI *funcs):
     cdef Func instance = Func.__new__(Func)
     instance.funcs = funcs
@@ -721,19 +685,12 @@ cdef class CallbackData(object):
 
     cdef EnvironmentData env
 
-    def __init__(self, object node, EnvironmentData env, object callback = None):
+    def __init__(self, object node, EnvironmentData env, object callback):
         # Keeps the node alive during the call.
         self.node = node
 
         self.callback = callback
         self.env = env
-
-    def receive(self, n, result):
-        with use_environment(self.env).use():
-            if isinstance(result, Exception):
-                self.callback(None, result)
-            else:
-                self.callback(result, None)
 
 
 cdef createCallbackData(const VSAPI* funcs, RawNode node, object cb):
@@ -754,7 +711,7 @@ cdef class FramePtr(object):
             self.funcs.freeFrame(self.f)
 
 cdef FramePtr createFramePtr(const VSFrame *f, const VSAPI *funcs):
-    cdef FramePtr instance = FramePtr.__new__(FramePtr)    
+    cdef FramePtr instance = FramePtr.__new__(FramePtr)
     instance.f = f
     instance.funcs = funcs
     return instance
@@ -762,28 +719,25 @@ cdef FramePtr createFramePtr(const VSFrame *f, const VSAPI *funcs):
 
 cdef void __stdcall frameDoneCallback(void *data, const VSFrame *f, int n, VSNode *node, const char *errormsg) nogil:
     with gil:
+        result = error = None
         d = <CallbackData>data
+
         try:
             if f == NULL:
-                result = 'Internal error - no error message.'
+                error = 'Internal error - no error message.'
                 if errormsg != NULL:
-                    result = errormsg.decode('utf-8')
-                result = Error(result)
-
-            elif isinstance(d.node, VideoNode):
-                result = createConstFrame(f, d.funcs, d.node.core.core)
-
-            elif isinstance(d.node, AudioNode):
-                result = createConstAudioFrame(f, d.funcs, d.node.core.core)
-
+                    error = errormsg.decode('utf-8')
+                error = Error(error)
             else:
-                result = Error("This should not happen. Add your own node-implementation to the frameDoneCallback code.")
-            
-            try:
-                d.receive(n, result)
-            except:
-                import traceback
-                traceback.print_exc()
+                if isinstance(d.node, RawNode):
+                    result = createConstFrame(f, d.funcs, d.node.core.core)
+                else:
+                    error = Error("This should not happen. Add your own node-implementation to the frameDoneCallback code.")
+
+            with use_environment(d.env).use():
+                d.callback(result, error)
+        except:
+            traceback.print_exc()
         finally:
             Py_DECREF(d)
 
@@ -843,7 +797,7 @@ cdef void dictToMap(dict ndict, VSMap *inm, VSCore *core, const VSAPI *funcs) ex
             try:
                 iter(val)
             except:
-                val = [val]     
+                val = [val]
 
         for v in val:
             if isinstance(v, int):
@@ -871,9 +825,9 @@ cdef void dictToMap(dict ndict, VSMap *inm, VSCore *core, const VSAPI *funcs) ex
             elif callable(v):
                 tf = createFuncPython(v, core, funcs)
 
-                if funcs.mapSetFunction(inm, ckey, (<Func>v).ref, 1) != 0:
+                if funcs.mapSetFunction(inm, ckey, (<Func>tf).ref, 1) != 0:
                     raise Error('not all values are of the same type in ' + key)
-   
+
             else:
                 raise Error('argument ' + key + ' was passed an unsupported type (' + type(v).__name__ + ')')
 
@@ -885,7 +839,7 @@ cdef void typedDictToMap(dict ndict, dict atypes, VSMap *inm, VSCore *core, cons
         if val is None:
             continue
 
-        if isinstance(val, (str, bytes, bytearray, RawNode, RawFrame)) or not isinstance(val, Iterable):
+        if isinstance(val, (str, bytes, bytearray, RawNode, RawFrame)) or not isinstance(val, typing.Iterable):
             val = [val]
 
         for v in val:
@@ -924,11 +878,11 @@ cdef void typedDictToMap(dict ndict, dict atypes, VSMap *inm, VSCore *core, cons
             if atypes[key][:5] == 'vnode':
                 funcs.mapSetEmpty(inm, ckey, ptVideoNode)
             elif atypes[key][:5] == 'anode':
-                funcs.mapSetEmpty(inm, ckey, ptAudioNode)     
+                funcs.mapSetEmpty(inm, ckey, ptAudioNode)
             elif atypes[key][:6] == 'vframe':
                 funcs.mapSetEmpty(inm, ckey, ptVideoFrame)
             elif atypes[key][:6] == 'aframe':
-                funcs.mapSetEmpty(inm, ckey, ptAudioFrame)   
+                funcs.mapSetEmpty(inm, ckey, ptAudioFrame)
             elif atypes[key][:4] == 'func':
                 funcs.mapSetEmpty(inm, ckey, ptFunction)
             elif atypes[key][:3] == 'int':
@@ -1264,7 +1218,7 @@ cdef FrameProps createFrameProps(RawFrame f):
     return instance
 
 # Make sure the FrameProps-Object quacks like a Mapping.
-Mapping.register(FrameProps)
+typing.Mapping.register(FrameProps)
 
 
 cdef class ChannelLayout(int):
@@ -1314,7 +1268,7 @@ cdef class RawFrame(object):
     cdef VSCore *core
     cdef const VSAPI *funcs
     cdef unsigned flags
-    
+
     cdef object __weakref__
 
     def __init__(self):
@@ -1742,7 +1696,6 @@ cdef class _1dview_contig:
 @cython.final
 @cython.internal
 cdef class _audio:
-
     @staticmethod
     cdef _1dview_contig allocinfo(const VSAudioFormat* format):
         cdef:
@@ -1768,12 +1721,25 @@ cdef class _audio:
         view.len = view.shape[0] * view.itemsize
         view.buf = _frame.getdata(frame, channel, flags, lib)
 
+cdef _get_handle_future():
+    fut = Future()
+    fut.set_running_or_notify_cancel()
+
+    def _handle_future(result, exception):
+        if exception is not None:
+            fut.set_exception(exception)
+        else:
+            fut.set_result(result)
+
+    _handle_future.fut = fut
+
+    return _handle_future
 
 cdef class RawNode(object):
     cdef VSNode *node
     cdef const VSAPI *funcs
     cdef Core core
-   
+
     cdef object __weakref__
 
     def __init__(self):
@@ -1784,22 +1750,14 @@ cdef class RawNode(object):
 
     def get_frame_async(self, int n, object cb = None):
         if cb is None:
-            def _handle_future(result, exception):
-                if exception is not None:
-                    fut.set_exception(exception)
-                else:
-                    fut.set_result(result)
-
-            from concurrent.futures import Future
-            fut = Future()
-            fut.set_running_or_notify_cancel()
+            _handle_future = _get_handle_future()
 
             try:
                 self.get_frame_async(n, _handle_future)
             except Exception as e:
-                fut.set_exception(e)
+                _handle_future.fut.set_exception(e)
 
-            return fut
+            return _handle_future.fut
 
         cdef CallbackData data = createCallbackData(self.funcs, self, cb)
         Py_INCREF(data)
@@ -1810,46 +1768,63 @@ cdef class RawNode(object):
     def frames(self, prefetch=None, backlog=None, close=False):
         if prefetch is None or prefetch <= 0:
             prefetch = self.core.num_threads
+        
         if backlog is None or backlog < 0:
-            backlog = prefetch*3
+            backlog = prefetch * 3
         elif backlog < prefetch:
             backlog = prefetch
 
-        enum_fut = enumerate((self.get_frame_async(frameno) for frameno in range(self.num_frames)))
+        def _get_enum_fut():
+            get_frame_async = self.get_frame_async
+
+            for n in range(self.num_frames):
+                handle_future = _get_handle_future()
+                get_frame_async(n, handle_future)
+
+                yield n, handle_future.fut
+
+            return None
+
+        enum_fut = _get_enum_fut().__next__
 
         finished = False
         running = 0
         lock = RLock()
         reorder = {}
+        curr_frames = 0
 
         def _request_next():
-            nonlocal finished, running
-            with lock:
-                if finished:
-                    return
+            nonlocal finished, running, curr_frames
+            
+            if finished:
+                return
 
-                ni = next(enum_fut, None)
-                if ni is None:
+            with lock:
+                try:
+                    idx, fut = enum_fut()
+                except StopIteration:
                     finished = True
                     return
 
-                running += 1
-
-                idx, fut = ni
                 reorder[idx] = fut
+                running += 1
+                curr_frames += 1
+                
                 fut.add_done_callback(_finished)
 
         def _finished(f):
             nonlocal finished, running
+            
             with lock:
                 running -= 1
+                
                 if finished:
                     return
 
                 if f.exception() is not None:
                     finished = True
                     return
-                
+
                 _refill()
 
         def _refill():
@@ -1859,13 +1834,14 @@ cdef class RawNode(object):
             with lock:
                 # Two rules: 1. Don't exceed the concurrency barrier.
                 #            2. Don't exceed unused-frames-backlog
-                while (not finished) and (running < prefetch) and len(reorder)<backlog:
+                while (not finished) and (running < prefetch) and curr_frames < backlog:
                     _request_next()
         _refill()
 
         sidx = 0
+
         try:
-            while (not finished) or (len(reorder)>0) or running>0:
+            while (not finished) or (curr_frames > 0) or running > 0:
                 if sidx not in reorder:
                     # Spin. Reorder being empty should never happen.
                     continue
@@ -1874,23 +1850,27 @@ cdef class RawNode(object):
                 fut = reorder[sidx]
 
                 result = fut.result()
+                
                 del reorder[sidx]
+                
+                curr_frames -= 1
                 _refill()
 
                 sidx += 1
+
                 try:
                     yield result
 
                 finally:
                     if close:
                         result.close()
-
         finally:
             finished = True
 
             for fut in reorder.copy().values():
                 if fut.exception() is not None:
                     continue
+
                 fut.result().close()
 
             gc.collect()
@@ -1985,7 +1965,7 @@ cdef class VideoNode(RawNode):
 
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
     def __getattr__(self, name):
         try:
             obj = self.core.__getattr__(name)
@@ -2006,7 +1986,7 @@ cdef class VideoNode(RawNode):
         cdef char *ep = errorMsg
         cdef const VSFrame *f
         self.ensure_valid_frame_number(n)
-        
+
         with nogil:
             f = self.funcs.getFrame(n, self.node, errorMsg, 500)
         if f == NULL:
@@ -2018,8 +1998,6 @@ cdef class VideoNode(RawNode):
             return createConstVideoFrame(f, self.funcs, self.core.core)
 
     def set_output(self, int index = 0, VideoNode alpha = None, int alt_output = 0):
-        cdef const VSVideoFormat *aformat = NULL
-        clip = self
         if alpha is not None:
             if (self.vi.width != alpha.vi.width) or (self.vi.height != alpha.vi.height):
                 raise Error('Alpha clip dimensions must match the main video')
@@ -2030,10 +2008,8 @@ cdef class VideoNode(RawNode):
                     raise Error('Alpha clip format must match the main video')
             elif (self.vi.format.colorFamily != UNDEFINED) or (alpha.vi.format.colorFamily != UNDEFINED):
                 raise Error('Format must be either known or unknown for both alpha and main clip')
-            
-            _get_output_dict("set_output")[index] = VideoOutputTuple(self, alpha, alt_output)
-        else:
-            _get_output_dict("set_output")[index] = VideoOutputTuple(self, None, alt_output)
+
+        _get_output_dict("set_output")[index] = VideoOutputTuple(self, alpha, alt_output)
 
     def output(self, object fileobj not None, bint y4m = False, object progress_update = None, int prefetch = 0, int backlog = -1):
         if (fileobj is sys.stdout or fileobj is sys.stderr):
@@ -2041,7 +2017,7 @@ cdef class VideoNode(RawNode):
             # This is the responsibility of the application, which does know better where to output it.
             if not isinstance(get_policy(), StandaloneEnvironmentPolicy):
                 raise ValueError("In this context, use set_output() instead.")
-                
+
             if hasattr(fileobj, "buffer"):
                 fileobj = fileobj.buffer
 
@@ -2125,7 +2101,7 @@ cdef class VideoNode(RawNode):
                 raise ValueError('Slice step cannot be zero')
 
             indices = val.indices(self.num_frames)
-            
+
             step = indices[2]
 
             if step > 0:
@@ -2166,7 +2142,7 @@ cdef class VideoNode(RawNode):
             return self.core.std.Trim(clip=self, first=n, length=1)
         else:
             raise TypeError("index must be int or slice")
-            
+
     def __dir__(self):
         plugins = []
         for plugin in self.core.plugins():
@@ -2223,7 +2199,7 @@ cdef VideoNode createVideoNode(VSNode *node, const VSAPI *funcs, Core core):
         instance.fps = Fraction(0, 1)
 
     return instance
-    
+
 cdef class AudioNode(RawNode):
     cdef const VSAudioInfo *ai
     cdef readonly object sample_type
@@ -2234,10 +2210,10 @@ cdef class AudioNode(RawNode):
     cdef readonly int sample_rate
     cdef readonly int64_t num_samples
     cdef readonly int num_frames
-    
+
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
     def __getattr__(self, name):
         err = False
         try:
@@ -2261,7 +2237,7 @@ cdef class AudioNode(RawNode):
         cdef char *ep = errorMsg
         cdef const VSFrame *f
         self.ensure_valid_frame_number(n)
-        
+
         with nogil:
             f = self.funcs.getFrame(n, self.node, errorMsg, 500)
         if f == NULL:
@@ -2274,10 +2250,6 @@ cdef class AudioNode(RawNode):
 
     def set_output(self, int index = 0):
         _get_output_dict("set_output")[index] = self
-
-    @property
-    def channels(self):
-        return createChannelLayout(self.channel_layout, self.num_channels)
 
     def __add__(x, y):
         if not isinstance(x, AudioNode) or not isinstance(y, AudioNode):
@@ -2306,7 +2278,7 @@ cdef class AudioNode(RawNode):
                 raise ValueError('Slice step must be 1')
 
             indices = val.indices(self.num_samples)
-            
+
             step = indices[2]
 
             if step > 0:
@@ -2344,7 +2316,7 @@ cdef class AudioNode(RawNode):
             return self.core.std.AudioTrim(clip=self, first=n, length=1)
         else:
             raise TypeError("index must be int or slice")
-            
+
     def __dir__(self):
         plugins = []
         for plugin in self.core.plugins():
@@ -2367,19 +2339,19 @@ cdef class AudioNode(RawNode):
         )
 
     def __str__(self):
-        channels = ', '.join([c.name for c in self.channels])
-                
-        return (
-            'AudioNode\n'
-            f'\tSample Type: {self.sample_type.name}\n'
-            f'\tBits Per Sample: {self.bits_per_sample:d}\n'
-            f'\tBytes Per Sample: {self.bytes_per_sample:d}\n'
-            f'\tNum Channels: {self.num_channels:d}\n'
-            f'\tChannels: {channels}\n'
-            f'\tSample Rate: {self.sample_rate:d}\n'
-            f'\tNum Samples: {self.num_samples:d}\n'
-        )
-    
+        channels = []
+        for v in AudioChannels:
+            if ((1 << v) & self.channel_layout):
+                channels.append(AudioChannels(v).name)
+        channels = ', '.join(channels)
+
+        return ('Audio Node\n'
+               f'\tSample Type: {self.sample_type.name}\n'
+               f'\tBits Per Sample: {self.bits_per_sample:d}\n'
+               f'\tChannels: {channels:s}\n'
+               f'\tSample Rate: {self.sample_rate:d}\n'
+               f'\tNum Samples: {self.num_samples:d}\n')
+
 cdef AudioNode createAudioNode(VSNode *node, const VSAPI *funcs, Core core):
     cdef AudioNode instance = AudioNode.__new__(AudioNode)
     instance.core = core
@@ -2399,20 +2371,20 @@ cdef AudioNode createAudioNode(VSNode *node, const VSAPI *funcs, Core core):
 cdef class LogHandle(object):
     cdef VSLogHandle *handle
     cdef object handler_func
-    
+
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
 cdef LogHandle createLogHandle(object handler_func):
     cdef LogHandle instance = LogHandle.__new__(LogHandle)
     instance.handler_func = handler_func
     instance.handle = NULL
     return instance
-     
+
 cdef void __stdcall log_handler_wrapper(int msgType, const char *msg, void *userData) nogil:
     with gil:
         (<LogHandle>userData).handler_func(MessageType(msgType), msg.decode('utf-8'))
-        
+
 cdef void __stdcall log_handler_free(void *userData) nogil:
     with gil:
         Py_DECREF(<LogHandle>userData)
@@ -2430,16 +2402,16 @@ cdef class Core(object):
     def __dealloc__(self):
         if self.funcs:
             self.funcs.freeCore(self.core)
-            
+
     property num_threads:
         def __get__(self):
             cdef VSCoreInfo v
             self.funcs.getCoreInfo(self.core, &v)
             return v.numThreads
-        
+
         def __set__(self, int value):
             self.funcs.setThreadCount(value, self.core)
-            
+
     property max_cache_size:
         def __get__(self):
             cdef VSCoreInfo v
@@ -2448,7 +2420,7 @@ cdef class Core(object):
             current_size = current_size + 1024 * 1024 - 1
             current_size = current_size // <int64_t>(1024 * 1024)
             return current_size
-        
+
         def __set__(self, int mb):
             if mb <= 0:
                 raise ValueError('Maximum cache size must be a positive number')
@@ -2470,7 +2442,7 @@ cdef class Core(object):
             return createPlugin(plugin, self.funcs, self)
         else:
             raise AttributeError('No attribute with the name ' + name + ' exists. Did you mistype a plugin namespace?')
-        
+
     def plugins(self):
         cdef VSPlugin *plugin = self.funcs.getNextPlugin(NULL, self.core)
         while plugin:
@@ -2501,27 +2473,27 @@ cdef class Core(object):
         
     def log_message(self, MessageType message_type, str message):
         self.funcs.logMessage(message_type, message.encode('utf-8'), self.core)
-        
+
     def add_log_handler(self, handler_func):
         handler_func(MESSAGE_TYPE_DEBUG, 'New message handler installed from python')
         cdef LogHandle lh = createLogHandle(handler_func)
         Py_INCREF(lh)
         lh.handle = self.funcs.addLogHandler(log_handler_wrapper, log_handler_free, <void *>lh, self.core)
         return lh
-    
+
     def remove_log_handler(self, LogHandle handle):
         return self.funcs.removeLogHandler(handle.handle, self.core)
-        
+
     def version(self):
         cdef VSCoreInfo v
         self.funcs.getCoreInfo(self.core, &v)
         return (<const char *>v.versionString).decode('utf-8')
-        
+
     def version_number(self):
         cdef VSCoreInfo v
         self.funcs.getCoreInfo(self.core, &v)
         return v.core
-        
+
     def __dir__(self):
         plugins = []
         for plugin in self.plugins():
@@ -2573,7 +2545,7 @@ cdef Core createCore(EnvironmentData env):
     instance.core = instance.funcs.createCore(env.coreCreationFlags)
     instance.creationFlags = env.coreCreationFlags
     return instance
-    
+
 cdef Core createCore2(VSCore *core):
     cdef Core instance = Core.__new__(Core)
     instance.funcs = getVapourSynthAPI(VAPOURSYNTH_API_VERSION)
@@ -2588,61 +2560,36 @@ cdef Core _get_core(threads = None):
         raise Error('No environment is currently activated. Please activate an environment. (Hint: get_current_environment().use() allows you to temporary select an environment of your choice.)')
 
     return vsscript_get_core_internal(env)
-    
+
 cdef Core vsscript_get_core_internal(EnvironmentData env):
     if env.core is None:
         env.core = createCore(env)
     return env.core
-    
+
 cdef class _CoreProxy(object):
 
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-    
+
     @property
     def core(self):
         return _get_core()
 
-    def version_number(self):
-        return __version__[0]
-        
     def __dir__(self):
         d = dir(self.core)
         if 'core' not in d:
             d += ['core']
-            
+
         return d
-        
+
     def __getattr__(self, name):
         return getattr(self.core, name)
-        
+
     def __setattr__(self, name, value):
         setattr(self.core, name, value)
 
-    def __repr__(self):
-        if _env_current() is None:
-            core_repr = None
-        else:
-            core_repr = repr(self.core)
-
-        return _construct_repr(self, core=core_repr)
-
-
-    def __str__(self):
-        if _env_current() is None:
-            return (
-                'Uninitialized Environment:\n'
-                f'\tCore R{__version__[0]}\n'
-                f'\tAPI R{__api_version__[0]}.{__api_version__[1]}\n'
-                '\tOptions: Unknown\n'
-                '\tNumber of Threads: Unknown\n'
-                '\tMax Cache Size: Unknown\n'
-            )
-
-        return str(self.core)
-    
 core = _CoreProxy.__new__(_CoreProxy)
-    
+
 
 cdef class Plugin(object):
     cdef Core core
@@ -2655,7 +2602,7 @@ cdef class Plugin(object):
 
     def __init__(self):
         raise Error('Class cannot be instantiated directly')
-        
+
     def __getattr__(self, name):
         tname = name.encode('utf-8')
         cdef const char *cname = tname
@@ -2673,6 +2620,10 @@ cdef class Plugin(object):
             func = self.funcs.getNextPluginFunction(func, self.plugin)
             yield tmp
 
+    @property
+    def __version__(self):
+        return <int>self.funcs.getPluginVersion(self.plugin)
+
     def __dir__(self):
         attrs = []
         if isinstance(self.injected_arg, VideoNode):
@@ -2687,13 +2638,13 @@ cdef class Plugin(object):
             for func in self.functions():
                 attrs.append(func.name)
         return attrs
-        
+
     cdef is_video_injectable(self):
         for func in self.functions():
             if (<Function>func).is_video_injectable():
                 return True
         return False
-        
+
     cdef is_audio_injectable(self):
         for func in self.functions():
             if (<Function>func).is_audio_injectable():
@@ -2718,11 +2669,9 @@ cdef class Function(object):
     cdef readonly str name
     cdef readonly str signature
     cdef readonly str return_signature
-    
+
     @property
     def __signature__(self):
-        if typing is None:
-            return None
         return construct_signature(self.signature, self.return_signature, injected=self.plugin.injected_arg)
 
     def __init__(self):
@@ -2730,7 +2679,7 @@ cdef class Function(object):
 
     cdef is_video_injectable(self):
         return self.signature.find(':vnode') > 0
-        
+
     cdef is_audio_injectable(self):
         return self.signature.find(':anode') > 0
 
@@ -2782,7 +2731,7 @@ cdef class Function(object):
             raise Error(self.name + ': Too many unnamed arguments specified')
 
         if (len(ndict) > 0) and not any:
-            raise Error(self.name + ': Function does not take argument(s) named ' + ', '.join(ndict.keys()))          
+            raise Error(self.name + ': Function does not take argument(s) named ' + ', '.join(ndict.keys()))
 
         inm = self.funcs.createMap()
 
@@ -2795,11 +2744,11 @@ cdef class Function(object):
         except Error as e:
             self.funcs.freeMap(inm)
             dtomsuccess = False
-            dtomexceptmsg = str(e)    
+            dtomexceptmsg = str(e)
         except Exception:
             self.funcs.freeMap(inm)
             raise
-        
+
         if dtomsuccess == False:
             raise Error(self.name + ': ' + dtomexceptmsg)
 
@@ -2908,7 +2857,7 @@ cdef void __stdcall publicFunction(const VSMap *inm, VSMap *outm, void *userData
             vsapi.mapSetError(outm, emsg)
 
 
-@final
+@cython.final
 cdef class VSScriptEnvironmentPolicy:
     cdef dict _env_map
 
@@ -2970,21 +2919,21 @@ cdef class VSScriptEnvironmentPolicy:
     def set_environment(self, environment):
         if not self.is_alive(environment):
             environment = None
-        
+
         previous = getattr(self._stack, "stack", None)
         self._stack.stack = environment
         return previous
 
     cdef EnvironmentData _make_environment(self, int script_id, VSScript *se):
         cdef EnvironmentData env = self._api.create_environment()
-          
+
         if se and se.core:
             env.core = createCore2(se.core)
             se.core = NULL # unset the core to indicate it's been used
 
         self._env_map[script_id] = env
         return env
-      
+
     cdef has_environment(self, int script_id):
         return script_id in self._env_map
 
@@ -2994,7 +2943,7 @@ cdef class VSScriptEnvironmentPolicy:
             self.stdout.flush()
             self.stderr.flush()
             self._api.destroy_environment(env)
-            
+
     def is_alive(self, EnvironmentData environment):
         return environment.alive
 
@@ -3024,7 +2973,7 @@ cdef object _vsscript_use_or_create_environment(int id):
 def __chdir(filename, flags):
     if ((flags&1) == 0) or (filename is None) or (filename.startswith("<") and filename.endswith(">")):
         return (yield)
-    
+
     origpath = os.getcwd()
     newpath = os.path.dirname(os.path.abspath(filename))
 
@@ -3039,7 +2988,7 @@ cdef void _vpy_replace_pyenvdict(VSScript *se, dict pyenvdict):
     if se.pyenvdict:
         Py_DECREF(<dict>se.pyenvdict)
         se.pyenvdict = NULL
-    
+
     if pyenvdict is not None:
         Py_INCREF(pyenvdict)
         se.pyenvdict = <void*>pyenvdict
@@ -3052,7 +3001,7 @@ cdef int _vpy_evaluate(VSScript *se, bytes script, str filename):
             pyenvdict = <dict>se.pyenvdict
         else:
             _vpy_replace_pyenvdict(se, pyenvdict)
-        
+
         pyenvdict["__name__"] = "__vapoursynth__"
         code = compile(script, filename=filename, dont_inherit=True, mode="exec")
 
@@ -3090,7 +3039,7 @@ cdef int _vpy_evaluate(VSScript *se, bytes script, str filename):
         Py_INCREF(errstr)
         se.errstr = <void *>errstr
         return 1
-        
+
 
 cdef public api int vpy4_createScript(VSScript *se) nogil:
     with gil:
@@ -3104,8 +3053,8 @@ cdef public api int vpy4_createScript(VSScript *se) nogil:
             Py_INCREF(errstr)
             se.errstr = <void *>errstr
             return 1
-        return 0         
-    
+        return 0
+
 cdef public api int vpy_evaluateScript(VSScript *se, const char *script, const char *scriptFilename, int flags) nogil:
     with gil:
         fn = scriptFilename.decode('utf-8')
@@ -3143,14 +3092,14 @@ cdef public api int vpy4_evaluateBuffer(VSScript *se, const char *buffer, const 
             if not se.pyenvdict:
                 _vpy_replace_pyenvdict(se, {})
             pyenvdict = <dict>se.pyenvdict
-            
+
             if buffer == NULL:
                 raise RuntimeError("NULL buffer passed.")
 
             fn = None
             if scriptFilename:
                 fn = scriptFilename.decode('utf-8')
-            
+
             if se.setCWD:
                 with __chdir(fn, 1):
                     return _vpy_evaluate(se, buffer, fn)
@@ -3169,7 +3118,7 @@ cdef public api int vpy4_evaluateFile(VSScript *se, const char *scriptFilename) 
         try:
             if scriptFilename == NULL:
                 raise RuntimeError("NULL scriptFilename passed.")
-                
+
             with open(scriptFilename.decode('utf-8'), 'rb') as f:
                 script = f.read(1024*1024*16)
             return vpy4_evaluateBuffer(se, script, scriptFilename)
@@ -3214,7 +3163,7 @@ cdef public api const char *vpy4_getError(VSScript *se) nogil:
     with gil:
         errstr = <bytes>se.errstr
         return errstr
-            
+
 cdef public api VSNode *vpy4_getOutput(VSScript *se, int index) nogil:
     with gil:
         pyenvdict = <dict>se.pyenvdict
@@ -3226,12 +3175,12 @@ cdef public api VSNode *vpy4_getOutput(VSScript *se, int index) nogil:
 
         if isinstance(node, VideoOutputTuple):
             node = node[0]
-            
+
         if isinstance(node, RawNode):
             return (<RawNode>node).funcs.addNodeRef((<RawNode>node).node)
         else:
             return NULL
-            
+
 cdef public api VSNode *vpy4_getAlphaOutput(VSScript *se, int index) nogil:
     with gil:
         pyenvdict = <dict>se.pyenvdict
@@ -3242,11 +3191,11 @@ cdef public api VSNode *vpy4_getAlphaOutput(VSScript *se, int index) nogil:
             return NULL
 
         if isinstance(node, VideoOutputTuple):
-            node = node[1]   
+            node = node[1]
             if isinstance(node, RawNode):
                 return (<RawNode>node).funcs.addNodeRef((<RawNode>node).node)
         return NULL
-        
+
 cdef public api int vpy4_getAltOutputMode(VSScript *se, int index) nogil:
     with gil:
         pyenvdict = <dict>se.pyenvdict
@@ -3257,9 +3206,9 @@ cdef public api int vpy4_getAltOutputMode(VSScript *se, int index) nogil:
             return 0
 
         if isinstance(output, VideoOutputTuple):
-            return output[2]   
+            return output[2]
         return 0
-        
+
 cdef public api int vpy_clearOutput(VSScript *se, int index) nogil:
     with gil:
         try:
@@ -3281,7 +3230,7 @@ cdef public api VSCore *vpy4_getCore(VSScript *se) nogil:
 
 cdef public api const VSAPI *vpy4_getVSAPI(int version) nogil:
     return getVapourSynthAPI(version)
-    
+
 cdef const VSAPI *getVSAPIInternal() nogil:
     global _vsapi
     if _vsapi == NULL:
@@ -3305,7 +3254,7 @@ cdef public api int vpy4_setVariables(VSScript *se, const VSMap *vars) nogil:
     with gil:
         with _vsscript_use_environment(se.id).use():
             pyenvdict = <dict>se.pyenvdict
-            try:     
+            try:
                 pyenvdict.update(mapToDict(vars, False))
                 return 0
             except:
