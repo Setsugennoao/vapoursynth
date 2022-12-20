@@ -17,6 +17,7 @@
 #  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 """ This is the VapourSynth module implementing the Python bindings. """
 
+cimport vapoursynth
 include 'vsconstants.pxd'
 
 from vsscript_internal cimport VSScript
@@ -2601,6 +2602,9 @@ cdef class _CoreProxy(object):
     @property
     def core(self):
         return _get_core()
+
+    def version_number(self):
+        return __version__[0]
 
     def __dir__(self):
         d = dir(self.core)
