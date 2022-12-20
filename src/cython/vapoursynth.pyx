@@ -2279,6 +2279,10 @@ cdef class AudioNode(RawNode):
     def set_output(self, int index = 0):
         _get_output_dict("set_output")[index] = self
 
+    @property
+    def channels(self):
+        return createChannelLayout(self.channel_layout, self.num_channels)
+
     def __add__(x, y):
         if not isinstance(x, AudioNode) or not isinstance(y, AudioNode):
             return NotImplemented
