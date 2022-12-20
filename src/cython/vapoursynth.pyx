@@ -2647,6 +2647,8 @@ cdef class _CoreProxy(object):
     
 core = _CoreProxy.__new__(_CoreProxy)
 
+PluginVersion = namedtuple("PluginVersion", "major minor")
+
 
 cdef class Plugin(object):
     cdef Core core
@@ -2679,7 +2681,12 @@ cdef class Plugin(object):
 
     @property
     def __version__(self):
-        return <int>self.funcs.getPluginVersion(self.plugin)
+        ver = <int>self.funcs.getPluginVersion(self.plugin)
+
+        ver_major = (ver >> 16)
+        ver_minor = ver - (ver_major << 16)
+
+        return PluginVersion(ver_major, ver_minor)
 
     def __dir__(self):
         attrs = []
