@@ -574,6 +574,33 @@ def construct_signature(signature, return_signature, injected=None):
 
     return inspect.Signature(tuple(params), return_annotation=return_annotation)
 
+def _construct_repr_wrap(value):
+    if isinstance(value, (enum.Enum, VideoFormat)):
+        return value.name
+
+    if isinstance(value, typing.Iterator):
+        value = ', '.join(_construct_repr_wrap(v) for v in value)
+
+    to_wrap = isinstance(value, str) and not value.startswith('<') and ' ' in value
+
+    if to_wrap:
+        return f'"{value}"'
+    
+    return value
+
+def _construct_repr(obj, **kwargs):
+    address = f'{id(obj):X}'.rjust(16, "0")
+
+    add_data = ''
+
+    if kwargs:
+        add_data += ', '.join(
+            f'{key}={_construct_repr_wrap(value)}'
+            for key, value in kwargs.items()
+        )
+        add_data = f' {add_data}'
+
+    return f'<{obj.__class__.__module__}.{obj.__class__.__qualname__} object at 0x{address}{add_data}>'
 
 class Error(Exception):
     def __init__(self, value):
@@ -2339,19 +2366,19 @@ cdef class AudioNode(RawNode):
         )
 
     def __str__(self):
-        channels = []
-        for v in AudioChannels:
-            if ((1 << v) & self.channel_layout):
-                channels.append(AudioChannels(v).name)
-        channels = ', '.join(channels)
-
-        return ('Audio Node\n'
-               f'\tSample Type: {self.sample_type.name}\n'
-               f'\tBits Per Sample: {self.bits_per_sample:d}\n'
-               f'\tChannels: {channels:s}\n'
-               f'\tSample Rate: {self.sample_rate:d}\n'
-               f'\tNum Samples: {self.num_samples:d}\n')
-
+        channels = ', '.join([c.name for c in self.channels])
+                
+        return (
+            'AudioNode\n'
+            f'\tSample Type: {self.sample_type.name}\n'
+            f'\tBits Per Sample: {self.bits_per_sample:d}\n'
+            f'\tBytes Per Sample: {self.bytes_per_sample:d}\n'
+            f'\tNum Channels: {self.num_channels:d}\n'
+            f'\tChannels: {channels}\n'
+            f'\tSample Rate: {self.sample_rate:d}\n'
+            f'\tNum Samples: {self.num_samples:d}\n'
+        )
+    
 cdef AudioNode createAudioNode(VSNode *node, const VSAPI *funcs, Core core):
     cdef AudioNode instance = AudioNode.__new__(AudioNode)
     instance.core = core
@@ -2588,6 +2615,28 @@ cdef class _CoreProxy(object):
     def __setattr__(self, name, value):
         setattr(self.core, name, value)
 
+    def __repr__(self):
+        if _env_current() is None:
+            core_repr = None
+        else:
+            core_repr = repr(self.core)
+
+        return _construct_repr(self, core=core_repr)
+
+
+    def __str__(self):
+        if _env_current() is None:
+            return (
+                'Uninitialized Environment:\n'
+                f'\tCore R{__version__[0]}\n'
+                f'\tAPI R{__api_version__[0]}.{__api_version__[1]}\n'
+                '\tOptions: Unknown\n'
+                '\tNumber of Threads: Unknown\n'
+                '\tMax Cache Size: Unknown\n'
+            )
+
+        return str(self.core)
+    
 core = _CoreProxy.__new__(_CoreProxy)
 
 
