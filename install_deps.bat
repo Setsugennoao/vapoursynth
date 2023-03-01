@@ -13,7 +13,7 @@ IF NOT EXIST libp2p (
 )
 
 IF NOT EXIST vsrepo (
-    git clone https://github.com/vapoursynth/vsrepo
+    git clone https://github.com/Setsugennoao/vsrepo
 ) ELSE (
     echo vsrepo: & pushd vsrepo & git pull &popd
 )
