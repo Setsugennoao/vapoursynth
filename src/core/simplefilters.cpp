@@ -1754,50 +1754,71 @@ static const VSFrame *VS_CC pemVerifierGetFrame(int n, int activationReason, voi
             int height = vsapi->getFrameHeight(src, plane);
             const uint8_t *srcp = vsapi->getReadPtr(src, plane);
             ptrdiff_t src_stride = vsapi->getStride(src, plane);
+            half h;
             float f;
             uint16_t v;
 
-            switch (fi->bytesPerSample) {
-            case 1:
-                for (int y = 0; y < height; y++) {
-                    for (int x = 0; x < width; x++)
-                        if (srcp[x] < d->lower[plane] || srcp[x] > d->upper[plane]) {
-                            snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%d) at: plane: %d Y: %d, X: %d, Frame: %d", (int)srcp[x], plane, y, x, n);
-                            vsapi->setFilterError(strbuf, frameCtx);
-                            vsapi->freeFrame(src);
-                            return nullptr;
-                        }
-                    srcp += src_stride;
-                }
-                break;
-            case 2:
-                for (int y = 0; y < height; y++) {
-                    for (int x = 0; x < width; x++) {
-                        v = ((const uint16_t *)srcp)[x];
-                        if (v < d->lower[plane] || v > d->upper[plane]) {
-                            snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%d) at: plane: %d Y: %d, X: %d, Frame: %d", (int)v, plane, y, x, n);
-                            vsapi->setFilterError(strbuf, frameCtx);
-                            vsapi->freeFrame(src);
-                            return nullptr;
-                        }
+            if (fi->sampleType == stInteger) {
+                switch (fi->bytesPerSample) {
+                case 1:
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++)
+                            if (srcp[x] < d->lower[plane] || srcp[x] > d->upper[plane]) {
+                                snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%d) at: plane: %d Y: %d, X: %d, Frame: %d", (int)srcp[x], plane, y, x, n);
+                                vsapi->setFilterError(strbuf, frameCtx);
+                                vsapi->freeFrame(src);
+                                return nullptr;
+                            }
+                        srcp += src_stride;
                     }
-                    srcp += src_stride;
-                }
-                break;
-            case 4:
-                for (int y = 0; y < height; y++) {
-                    for (int x = 0; x < width; x++) {
-                        f = ((const float *)srcp)[x];
-                        if (f < d->lowerf[plane] || f > d->upperf[plane] || !isfinite(f)) {
-                            snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%f) at: plane: %d Y: %d, X: %d, Frame: %d", f, plane, y, x, n);
-                            vsapi->setFilterError(strbuf, frameCtx);
-                            vsapi->freeFrame(src);
-                            return nullptr;
+                    break;
+                case 2:
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++) {
+                            v = ((const uint16_t *)srcp)[x];
+                            if (v < d->lower[plane] || v > d->upper[plane]) {
+                                snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%d) at: plane: %d Y: %d, X: %d, Frame: %d", (int)v, plane, y, x, n);
+                                vsapi->setFilterError(strbuf, frameCtx);
+                                vsapi->freeFrame(src);
+                                return nullptr;
+                            }
                         }
+                        srcp += src_stride;
                     }
-                    srcp += src_stride;
+                    break;
                 }
-                break;
+            } else {
+                switch (fi->bytesPerSample) {
+                case 2:
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++) {
+                            h = ((const half *)srcp)[x];
+                            if (h < d->lowerf[plane] || h > d->upperf[plane] || !isfinite(h)) {
+                                snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%f) at: plane: %d Y: %d, X: %d, Frame: %d", (float)h, plane, y, x, n);
+                                vsapi->setFilterError(strbuf, frameCtx);
+                                vsapi->freeFrame(src);
+                                return nullptr;
+                            }
+                        }
+                        srcp += src_stride;
+                    }
+                    break;
+                case 4:
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++) {
+                            f = ((const float *)srcp)[x];
+                            if (f < d->lowerf[plane] || f > d->upperf[plane] || !isfinite(f)) {
+                                snprintf(strbuf, sizeof(strbuf), "PEMVerifier: Illegal sample value (%f) at: plane: %d Y: %d, X: %d, Frame: %d", f, plane, y, x, n);
+                                vsapi->setFilterError(strbuf, frameCtx);
+                                vsapi->freeFrame(src);
+                                return nullptr;
+                            }
+                        }
+                        srcp += src_stride;
+                    }
+                    break;
+                }
+
             }
         }
         return src;
@@ -1813,8 +1834,8 @@ static void VS_CC pemVerifierCreate(const VSMap *in, VSMap *out, void *userData,
     d->node = vsapi->mapGetNode(in, "clip", 0, 0);
     const VSVideoInfo *vi = vsapi->getVideoInfo(d->node);
 
-    if (!is8to16orFloatFormat(vi->format))
-        RETERROR(invalidVideoFormatMessage(vi->format, vsapi, "PEMVerifier").c_str());
+    if (!is8to16orFloatFormat(vi->format, true))
+        RETERROR(invalidVideoFormatMessage(vi->format, vsapi, "PEMVerifier", true).c_str());
 
     if (numlower < 0) {
         for (int i = 0; i < vi->format.numPlanes; i++) {
