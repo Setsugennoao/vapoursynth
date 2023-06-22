@@ -51,44 +51,6 @@ static inline uint32_t bit_cast_uint32(float v) {
     return ret;
 }
 
-static inline float bit_cast_float(uint32_t v) {
-    float ret;
-    memcpy(&ret, &v, sizeof(ret));
-    return ret;
-}
-
-static inline uint16_t floatToHalf(float x) {
-    float magic = bit_cast_float((uint32_t)15 << 23);
-    uint32_t inf = 255UL << 23;
-    uint32_t f16inf = 31UL << 23;
-    uint32_t sign_mask = 0x80000000UL;
-    uint32_t round_mask = ~0x0FFFU;
-    uint16_t ret;
-    uint32_t f = bit_cast_uint32(x);
-    uint32_t sign = f & sign_mask;
-    f ^= sign;
-
-    if (f >= inf) {
-        ret = f > inf ? 0x7E00 : 0x7C00;
-    } else {
-        f &= round_mask;
-        f = bit_cast_uint32(bit_cast_float(f)* magic);
-        f -= round_mask;
-
-        if (f > f16inf)
-            f = f16inf;
-
-        ret = (uint16_t)(f >> 13);
-    }
-
-    ret |= (uint16_t)(sign >> 16);
-    return ret;
-}
-
-static inline int isInfHalf(uint16_t v) {
-    return (v & 0x7C00) == 0x7C00;
-}
-
 static inline uint32_t doubleToIntPixelValue(double v, int bits, int *err) {
     *err = 0;
 
@@ -127,13 +89,13 @@ static inline uint16_t doubleToHalfPixelValue(double v, int *err) {
         return 0;
     }
 
-    uint16_t f16 = floatToHalf(f);
-    if (isInfHalf(f16)) {
+    half f16{f};
+    if (!isfinite(f16)) {
         *err = 1;
         return 0;
     }
 
-    return f16;
+    return f16.data();
 }
 
 //////////////////////////////////////////
