@@ -21,6 +21,7 @@
 #ifndef FILTERSHARED_H
 #define FILTERSHARED_H
 
+#include "half.h"
 #include "VapourSynth4.h"
 #include <cstring>
 #include <stdexcept>
