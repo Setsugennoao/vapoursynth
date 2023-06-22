@@ -71,6 +71,23 @@ static void scrawl_character_int(unsigned char c, uint8_t *image, ptrdiff_t stri
     }
 }
 
+static void scrawl_character_half(unsigned char c, uint8_t *image, ptrdiff_t stride, int dest_x, int dest_y, int scale) {
+    half white = 1.0h;
+    half black = 0.0h;
+    int x, y;
+
+    for (y = 0; y < character_height * scale; y++) {
+        for (x = 0; x < character_width * scale; x++) {
+            if (__font_bitmap__[c * character_height + y/scale] & (1 << (7 - x/scale))) {
+                reinterpret_cast<half *>(image)[dest_y*stride/2 + dest_x + x] = white;
+            } else {
+                reinterpret_cast<half *>(image)[dest_y*stride/2 + dest_x + x] = black;
+            }
+        }
+
+        dest_y++;
+    }
+}
 
 static void scrawl_character_float(unsigned char c, uint8_t *image, ptrdiff_t stride, int dest_x, int dest_y, int scale) {
     float white = 1.0f;
@@ -223,6 +240,8 @@ static void scrawl_text(std::string txt, int alignment, int scale, VSFrame *fram
 
                     if (frame_format->sampleType == stInteger) {
                         scrawl_character_int(iter[i], image, stride, dest_x, dest_y, frame_format->bitsPerSample, scale);
+                    } else if (frame_format->bitsPerSample == 16) {
+                        scrawl_character_half(iter[i], image, stride, dest_x, dest_y, scale);
                     } else {
                         scrawl_character_float(iter[i], image, stride, dest_x, dest_y, scale);
                     }
@@ -235,6 +254,8 @@ static void scrawl_text(std::string txt, int alignment, int scale, VSFrame *fram
                     if (plane == 0) {
                         if (frame_format->sampleType == stInteger) {
                             scrawl_character_int(iter[i], image, stride, dest_x, dest_y, frame_format->bitsPerSample, scale);
+                        } else if (frame_format->bitsPerSample == 16) {
+                            scrawl_character_half(iter[i], image, stride, dest_x, dest_y, scale);
                         } else {
                             scrawl_character_float(iter[i], image, stride, dest_x, dest_y, scale);
                         }
@@ -245,13 +266,19 @@ static void scrawl_text(std::string txt, int alignment, int scale, VSFrame *fram
                         int sub_dest_y = dest_y >> frame_format->subSamplingH;
                         int y;
 
-                        if (frame_format->bitsPerSample == 8) {
-                            for (y = 0; y < sub_h; y++) {
-                                vs_memset<uint8_t>(image + (y+sub_dest_y)*stride + sub_dest_x, 128, sub_w);
+                        if (frame_format->sampleType == stInteger) {
+                            if (frame_format->bitsPerSample == 8) {
+                                for (y = 0; y < sub_h; y++) {
+                                    vs_memset<uint8_t>(image + (y+sub_dest_y)*stride + sub_dest_x, 128, sub_w);
+                                }
+                            } else {
+                                for (y = 0; y < sub_h; y++) {
+                                    vs_memset<uint16_t>(reinterpret_cast<uint16_t *>(image) + (y+sub_dest_y)*stride/2 + sub_dest_x, 128 << (frame_format->bitsPerSample - 8), sub_w);
+                                }
                             }
-                        } else if (frame_format->bitsPerSample <= 16) {
+                        } else if (frame_format->bitsPerSample == 16) {
                             for (y = 0; y < sub_h; y++) {
-                                vs_memset<uint16_t>(reinterpret_cast<uint16_t *>(image) + (y+sub_dest_y)*stride/2 + sub_dest_x, 128 << (frame_format->bitsPerSample - 8), sub_w);
+                                vs_memset<half>(reinterpret_cast<half *>(image) + (y+sub_dest_y)*stride/2 + sub_dest_x, 0.0h, sub_w);
                             }
                         } else {
                             for (y = 0; y < sub_h; y++) {
@@ -497,7 +524,7 @@ static const VSFrame *VS_CC textGetFrame(int n, int activationReason, void *inst
         const VSFrame *src = vsapi->getFrameFilter(n, d->node, frameCtx);
 
         const VSVideoFormat *frame_format = vsapi->getVideoFrameFormat(src);
-        if (!is8to16orFloatFormat(*frame_format)) {
+        if (!is8to16orFloatFormat(*frame_format, true)) {
             vsapi->freeFrame(src);
             vsapi->setFilterError(invalidVideoFormatMessage(*frame_format, vsapi, d->instanceName.c_str()).c_str(), frameCtx);
             return nullptr;
@@ -669,7 +696,7 @@ static void VS_CC textCreate(const VSMap *in, VSMap *out, void *userData, VSCore
     }
     d->vi = vsapi->getVideoInfo(d->node);
 
-    if (!is8to16orFloatFormat(d->vi->format, false, true)) {
+    if (!is8to16orFloatFormat(d->vi->format, true, true)) {
         vsapi->mapSetError(out, invalidVideoFormatMessage(d->vi->format, vsapi, "Text", false, true).c_str());
         vsapi->freeNode(d->node);
         return;
