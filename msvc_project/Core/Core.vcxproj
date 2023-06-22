@@ -198,7 +198,7 @@
     <ClCompile Include="..\..\src\core\kernel\merge.c" />
     <ClCompile Include="..\..\src\core\kernel\planestats.c" />
     <ClCompile Include="..\..\src\core\kernel\transpose.c" />
-    <ClCompile Include="..\..\src\core\kernel\x86\average_sse2.c" />
+    <ClCompile Include="..\..\src\core\kernel\x86\average_sse2.cpp" />
     <ClCompile Include="..\..\src\core\kernel\x86\convolution_avx2.cpp">
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -213,21 +213,21 @@
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <ClCompile Include="..\..\src\core\kernel\x86\generic_sse2.cpp" />
-    <ClCompile Include="..\..\src\core\kernel\x86\merge_avx2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\merge_avx2.cpp">
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\merge_sse2.c" />
-    <ClCompile Include="..\..\src\core\kernel\x86\planestats_avx2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\merge_sse2.cpp" />
+    <ClCompile Include="..\..\src\core\kernel\x86\planestats_avx2.cpp">
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\planestats_sse2.c" />
-    <ClCompile Include="..\..\src\core\kernel\x86\transpose_sse2.c" />
+    <ClCompile Include="..\..\src\core\kernel\x86\planestats_sse2.cpp" />
+    <ClCompile Include="..\..\src\core\kernel\x86\transpose_sse2.cpp" />
     <ClCompile Include="..\..\src\core\lutfilters.cpp" />
     <ClCompile Include="..\..\src\core\memoryuse.cpp" />
     <ClCompile Include="..\..\src\core\mergefilters.cpp" />

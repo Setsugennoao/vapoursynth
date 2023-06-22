@@ -75,19 +75,19 @@
     <ClCompile Include="..\..\src\core\kernel\transpose.c">
       <Filter>Source Files\kernel</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\transpose_sse2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\transpose_sse2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core\kernel\planestats.c">
       <Filter>Source Files\kernel</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\planestats_sse2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\planestats_sse2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core\kernel\merge.c">
       <Filter>Source Files\kernel</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\merge_sse2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\merge_sse2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core\kernel\generic.cpp">
@@ -102,10 +102,10 @@
     <ClCompile Include="..\..\src\core\cpufeatures.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\merge_avx2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\merge_avx2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\planestats_avx2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\planestats_avx2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core\kernel\x86\generic_avx2.cpp">
@@ -132,7 +132,7 @@
     <ClCompile Include="..\..\src\core\kernel\average.cpp">
       <Filter>Source Files\kernel</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\core\kernel\x86\average_sse2.c">
+    <ClCompile Include="..\..\src\core\kernel\x86\average_sse2.cpp">
       <Filter>Source Files\kernel\x86</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core\expr\expr.cpp">

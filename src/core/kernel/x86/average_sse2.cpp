@@ -11,15 +11,16 @@ static void load_int_srcs(const uint8_t **srcs, const void * const *srcs_, unsig
 	assert(num_srcs <= 32);
 
 	for (i = 0; i < num_srcs; ++i) {
-		srcs[i] = srcs_[i];
+		srcs[i] = (uint8_t *)(srcs_[i]);
 	}
 	if (num_srcs % 2)
 		srcs[num_srcs] = srcs[num_srcs - 1];
 }
 
-static void load_int_weights(__m128i mm_weights[16], const int *iweights, unsigned num_weights)
+static void load_int_weights(__m128i mm_weights[16], const void *_iweights, unsigned num_weights)
 {
 	unsigned i;
+	const int *iweights = reinterpret_cast<const int *>(_iweights);
 
 	for (i = 0; i < (num_weights & ~1); i += 2) {
 		int16_t lo = iweights[i + 0];
