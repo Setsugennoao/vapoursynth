@@ -198,12 +198,12 @@ cdef void _unset_logger(EnvironmentData env):
     env.log = NULL
 
 
-cdef void __stdcall _logCb(int msgType, const char *msg, void *userData) nogil:
+cdef void __stdcall _logCb(int msgType, const char *msg, void *userData) noexcept nogil:
     with gil:
         message = msg.decode("utf-8")
         (<object>userData)(MessageType(msgType), message)
 
-cdef void __stdcall _logFree(void* userData) nogil:
+cdef void __stdcall _logFree(void* userData) noexcept nogil:
     with gil:
         Py_DECREF(<object>userData)
 
@@ -776,7 +776,7 @@ cdef FramePtr createFramePtr(const VSFrame *f, const VSAPI *funcs):
     return instance
 
 
-cdef void __stdcall frameDoneCallback(void *data, const VSFrame *f, int n, VSNode *node, const char *errormsg) nogil:
+cdef void __stdcall frameDoneCallback(void *data, const VSFrame *f, int n, VSNode *node, const char *errormsg) noexcept nogil:
     with gil:
         result = error = None
         d = <CallbackData>data
@@ -788,10 +788,11 @@ cdef void __stdcall frameDoneCallback(void *data, const VSFrame *f, int n, VSNod
                     error = errormsg.decode('utf-8')
                 error = Error(error)
             else:
-                result = Error("This should not happen. Add your own node-implementation to the frameDoneCallback code.")
+                result = createConstFrame(f, d.funcs, d.node.core.core)
 
             try:
-                d.receive(n, result)
+                with use_environment(d.env).use():
+                    d.callback(result, error)
             except:
                 traceback.print_exc()
         finally:
@@ -814,7 +815,7 @@ cdef object mapToDict(const VSMap *map, bint flatten):
             elif proptype == ptFloat:
                 newval = funcs.mapGetFloat(map, retkey, y, NULL)
             elif proptype == ptData:
-                newval = funcs.mapGetData(map, retkey, y, NULL)
+                newval = funcs.mapGetData(map, retkey, y, NULL)[:funcs.mapGetDataSize(map, retkey, y, NULL)]
                 if funcs.mapGetDataTypeHint(map, retkey, y, NULL) == dtUtf8:
                     newval = newval.decode('utf-8')
             elif proptype == ptVideoNode or proptype == ptAudioNode:
@@ -856,7 +857,7 @@ cdef void dictToMap(dict ndict, VSMap *inm, VSCore *core, const VSAPI *funcs) ex
                 val = [val]
 
         for v in val:
-            if isinstance(v, int):
+            if isinstance(v, (int, enum.Flag)):
                 if funcs.mapSetInt(inm, ckey, int(v), 1) != 0:
                     raise Error('not all values are of the same type in ' + key)
             elif isinstance(v, float):
@@ -895,7 +896,7 @@ cdef void typedDictToMap(dict ndict, dict atypes, VSMap *inm, VSCore *core, cons
         if val is None:
             continue
 
-        if isinstance(val, (str, bytes, bytearray, RawNode, RawFrame)) or not isinstance(val, Iterable):
+        if isinstance(val, (str, bytes, bytearray, enum.Flag, RawNode, RawFrame)) or not isinstance(val, Iterable):
             val = [val]
 
         for v in val:
@@ -1070,7 +1071,10 @@ cdef class FrameProps(object):
         elif t == ptData:
             for i in range(numelem):
                 data = self.funcs.mapGetData(m, b, i, NULL)
-                ol.append(data[:self.funcs.mapGetDataSize(m, b, i, NULL)])
+                aval = data[:self.funcs.mapGetDataSize(m, b, i, NULL)]
+                if self.funcs.mapGetDataTypeHint(m, b, i, NULL) == dtUtf8:
+                    aval = aval.decode('utf-8')
+                ol.append(aval)
         elif t == ptVideoNode or t == ptAudioNode:
             for i in range(numelem):
                 ol.append(createNode(self.funcs.mapGetNode(m, b, i, NULL), self.funcs, _get_core()))
@@ -1117,7 +1121,7 @@ cdef class FrameProps(object):
                     tf = createFuncPython(v, self.core, self.funcs)
                     if funcs.mapSetFunction(m, b, tf.ref, 1) != 0:
                         raise Error('Not all values are of the same type')
-                elif isinstance(v, int):
+                elif isinstance(v, (int, enum.Flag)):
                     if funcs.mapSetInt(m, b, int(v), 1) != 0:
                         raise Error('Not all values are of the same type')
                 elif isinstance(v, float):
@@ -1510,7 +1514,7 @@ cdef VideoFrame createVideoFrame(VSFrame *f, const VSAPI *funcs, VSCore *core):
 cdef class _frame:
 
     @staticmethod
-    cdef void* getdata(VSFrame* frame, int index, unsigned* flags, const VSAPI* lib) nogil:
+    cdef void* getdata(VSFrame* frame, int index, unsigned* flags, const VSAPI* lib) noexcept nogil:
         cdef:
             unsigned mask
 
@@ -2427,11 +2431,11 @@ cdef LogHandle createLogHandle(object handler_func):
     instance.handle = NULL
     return instance
 
-cdef void __stdcall log_handler_wrapper(int msgType, const char *msg, void *userData) nogil:
+cdef void __stdcall log_handler_wrapper(int msgType, const char *msg, void *userData) noexcept nogil:
     with gil:
         (<LogHandle>userData).handler_func(MessageType(msgType), msg.decode('utf-8'))
 
-cdef void __stdcall log_handler_free(void *userData) nogil:
+cdef void __stdcall log_handler_free(void *userData) noexcept nogil:
     with gil:
         Py_DECREF(<LogHandle>userData)
 
@@ -2935,14 +2939,14 @@ class PythonVSScriptLoggingBridge(logging.Handler):
 
         core.log_message(mt, message)
 
-cdef void __stdcall freeFunc(void *pobj) nogil:
+cdef void __stdcall freeFunc(void *pobj) noexcept nogil:
     with gil:
         fobj = <FuncData>pobj
         Py_DECREF(fobj)
         fobj = None
 
 
-cdef void __stdcall publicFunction(const VSMap *inm, VSMap *outm, void *userData, VSCore *core, const VSAPI *vsapi) nogil:
+cdef void __stdcall publicFunction(const VSMap *inm, VSMap *outm, void *userData, VSCore *core, const VSAPI *vsapi) noexcept nogil:
     with gil:
         d = <FuncData>userData
         try:
@@ -3235,7 +3239,7 @@ cdef public api int vpy4_evaluateFile(VSScript *se, const char *scriptFilename) 
             se.errstr = <void *>errstr
             return 1
 
-cdef public api void vpy4_freeScript(VSScript *se) nogil:
+cdef public api void vpy4_freeScript(VSScript *se) noexcept nogil:
     with gil:
         vpy_clearEnvironment(se)
         if se.pyenvdict:
@@ -3369,7 +3373,7 @@ cdef public api int vpy_clearVariable(VSScript *se, const char *name) nogil:
             return 1
         return 0
 
-cdef public api void vpy_clearEnvironment(VSScript *se) nogil:
+cdef public api void vpy_clearEnvironment(VSScript *se) noexcept nogil:
     with gil:
         pyenvdict = <dict>se.pyenvdict
         for key in pyenvdict:

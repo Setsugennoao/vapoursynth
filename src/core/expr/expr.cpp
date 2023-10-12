@@ -22,6 +22,8 @@
 #include <cassert>
 #include <charconv>
 #include <cmath>
+#include <iostream>
+#include <locale>
 #include <map>
 #include <memory>
 #include <set>
@@ -203,11 +205,14 @@ ExprOp decodeToken(std::string_view token)
         return{ token[0] == 'd' ? ExprOpType::DUP : ExprOpType::SWAP, idx };
     } else {
         float f;
-        auto result = std::from_chars(token.data(), token.data() + token.size(), f);
-        if (result.ec == std::errc::invalid_argument)
-            throw std::runtime_error("failed to convert '" + std::string{ token } + "' to float");
-        if (result.ptr != token.data() + token.size())
-            throw std::runtime_error("failed to convert '" + std::string{ token } + "' to float, not the whole token could be converted");
+        std::string s;
+        std::string stoken(token);
+        std::istringstream numStream(stoken);
+        numStream.imbue(std::locale::classic());
+        if (!(numStream >> f))
+            throw std::runtime_error("failed to convert '" + stoken + "' to float");
+        if (numStream >> s)
+            throw std::runtime_error("failed to convert '" + stoken + "' to float, not the whole token could be converted");
         return{ ExprOpType::CONSTANT, f };
     }
 }

@@ -1334,12 +1334,7 @@ static void VS_CC blankClipCreate(const VSMap *in, VSMap *out, void *userData, V
 
     tmp2 = vsapi->mapGetInt(in, "varformat", 0, &err);
     if (!err && tmp2) {
-        deliveredInfo.format.colorFamily = cfUndefined;
-        deliveredInfo.format.bitsPerSample = 0;
-        deliveredInfo.format.bytesPerSample = 0;
-        deliveredInfo.format.subSamplingW = 0;
-        deliveredInfo.format.subSamplingH = 0;
-        deliveredInfo.format.numPlanes = 0;
+        deliveredInfo.format = {};
     }
 
     vsapi->createVideoFilter(out, "BlankClip", &deliveredInfo, blankClipGetframe, blankClipFree, d->keep ? fmUnordered : fmParallel, nullptr, 0, d.get(), core);
@@ -1433,7 +1428,7 @@ static const VSFrame *VS_CC frameEvalGetFrameWithProps(int n, int activationReas
     if (activationReason == arInitial) {
         for (auto iter : d->propsrc)
             vsapi->requestFrameFilter(n, iter, frameCtx);
-    } else if (activationReason == arAllFramesReady && !*frameData) {
+    } else if (activationReason == arAllFramesReady && !frameData[0]) {
         int err;
         vsapi->mapSetInt(d->in, "n", n, maAppend);
         for (auto iter : d->propsrc) {
@@ -1583,7 +1578,7 @@ static void VS_CC frameEvalCreate(const VSMap *in, VSMap *out, void *userData, V
         deps.push_back({d->propsrc[i], rpGeneral}); // FIXME, propsrc could be strict spatial
     for (int i = 0; i < numclipsrc; i++)
         deps.push_back({clipsrc[i], rpGeneral});
-    vsapi->createVideoFilter(out, "FrameEval", &d->vi, (d->propsrc.size() > 0) ? frameEvalGetFrameWithProps : frameEvalGetFrameNoProps, frameEvalFree, (d->propsrc.size() > 0) ? fmParallelRequests : fmUnordered, deps.data(), deps.size(), d.get(), core);
+    vsapi->createVideoFilter(out, "FrameEval", &d->vi, (d->propsrc.size() > 0) ? frameEvalGetFrameWithProps : frameEvalGetFrameNoProps, frameEvalFree, (d->propsrc.size() > 0) ? fmParallelRequests : fmUnordered, deps.data(), static_cast<int>(deps.size()), d.get(), core);
     d.release();
 
     for (auto &iter : clipsrc)
